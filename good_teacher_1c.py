@@ -20,7 +20,7 @@ from poutyne.framework.callbacks import ReduceLROnPlateau, ModelCheckpoint, Earl
 from logger import logging
 import datetime, os
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 # check LymphoMNIST virsion
 import LymphoMNIST as info
@@ -111,7 +111,7 @@ class ImgAugTransform:
         img = Image.fromarray(img).convert('L')
         return img
 
-im_size = 28
+im_size = 64
 
 val_transform = T.Compose([
     T.Resize((im_size, im_size)),
@@ -125,7 +125,7 @@ train_transform = T.Compose([
     ImgAugTransform(),
     T.ToTensor(),
     T.Normalize([0.4819], [0.1484]),  # Adjusted for 1-channel
-    # ConvertToRGB([])
+    # ConvertToRGB()
 ])
 
 
@@ -209,26 +209,35 @@ params = {
     'lr': 1e-5,
     'batch_size': 16,
     'epochs': 10000,
-    'model': "Teacher_MNIST"
+    'model': "Teacher_final-1c"
 }
 
+#%%
 
-# Load MNIST dataset
-from torchvision import datasets, transforms
-train_dataset = datasets.MNIST(root='./dataset', train=True, download=True, transform=train_transform)
-test_dataset = datasets.MNIST(root='./dataset', train=False, download=True, transform=val_transform)
-
-# Split validation and test data
-val_size = int(len(test_dataset)*0.5)
-test_size = len(test_dataset) - val_size
-test_dataset, val_dataset = random_split(test_dataset, [test_size, val_size])
-
-# Create data loaders
-train_dl = DataLoader(train_dataset, batch_size=64, shuffle=True, num_workers=4)
-val_dl = DataLoader(val_dataset, batch_size=64, shuffle=False, num_workers=4)
-test_dl = DataLoader(test_dataset, batch_size=64, shuffle=False, num_workers=4)
+# Initialize dataset
+original_train_ds = LymphoMNIST(root='./dataset', train=True, download=True, transform=train_transform, num_classes=3)
+original_test_ds = LymphoMNIST(root='./dataset', train=False, download=True, transform=val_transform, num_classes=3)
 
 
+# Specify labels to keep
+labels_to_keep = [0, 1] # 0: B, 1: T4, 2: T8
+
+# Initialize filtered dataset with labels to keep
+train_ds = FilteredLymphoMNIST(original_train_ds, labels_to_keep)
+test_ds= FilteredLymphoMNIST(original_test_ds, labels_to_keep)
+
+# Using the function with your dataset
+weights = balanced_weights(train_ds, len(labels_to_keep))
+sampler = WeightedRandomSampler(weights, len(weights))
+
+# Create the dataloaders
+train_dl, val_dl, test_dl = get_dataloaders(train_ds,
+                                            test_ds,
+                                            split=(0.5, 0.5),
+                                            batch_size=params['batch_size'],
+                                            sampler=sampler,
+                                            num_workers=4
+                                           )
 
 # print one image shape
 for x, y in train_dl:
@@ -241,52 +250,25 @@ for x, y in val_dl:
 
 
 # Load a pre-trained ResNet50 model
+resnet50 = models.resnet50(weights='IMAGENET1K_V1')
 
-# Define your QuantizedCNN model
-class QuantizedCNN(nn.Module):
-    def __init__(self, num_classes=2, input_size=(1, 28, 28)):
-        super(QuantizedCNN, self).__init__()
-        self.num_classes = num_classes
+# Modify the first convolutional layer to accept 1-channel input instead of 3
+resnet50.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
 
-        # Define the convolutional layers and pooling layers
-        self.features = nn.Sequential(
-            nn.Conv2d(1, 16, kernel_size=3, stride=1, padding=0),
-            nn.ReLU(),
-            nn.MaxPool2d(kernel_size=2, stride=2, padding=0),
-            nn.Conv2d(16, 16, kernel_size=3, stride=1, padding=0),
-            nn.ReLU(),
-            nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
-        )
-        
-        # Initialize the features to pass a dummy input through to find number of feature outputs
-        with torch.no_grad():
-            dummy_input = torch.zeros(1, *input_size)
-            dummy_output = self.features(dummy_input)
-            num_ftrs = dummy_output.numel() // dummy_output.size(0)  # Calculate total feature number dynamically
 
-        # Redefine the classifier part of the network
-        self.classifier = nn.Sequential(
-            nn.Flatten(),
-            nn.Dropout(0.5),
-            nn.Linear(num_ftrs, num_classes),
-            nn.Softmax(dim=1)
-        )
+# Adjust the final fully connected layer for your number of classes
+num_ftrs = resnet50.fc.in_features
+num_classes = len(labels_to_keep)  # Change to your number of classes
+resnet50.fc = nn.Linear(num_ftrs, num_classes)
 
-    def forward(self, x):
-        x = self.features(x)
-        x = self.classifier(x)
-        return x
-
-num_classes =10
-data_iter = iter(train_dl)
-samples, targets = next(data_iter)
-input_size = samples.shape[1:]
-cnn =  QuantizedCNN(num_classes=num_classes, input_size=input_size).to(device)
-
+# Move the modified model to CUDA
+cnn = resnet50.to(device)
 
 # Adjust the input size if necessary
-summary(cnn, input_size=input_size)
+summary(resnet50, (1, 64, 64))
 
+
+# %%
 
 project = Project()
 
@@ -297,7 +279,7 @@ model_name = params['model']
 # define our comet experiment
 experiment = Experiment(
     api_key="2iwTpjYhUb3dGr4yIiVtt1oRA",
-    project_name="TvsB-ablation",
+    project_name="KD4FPGA",
     # project_name="",
     workspace="khayrulbuet13")
 
