@@ -14,16 +14,18 @@ from logger import logging
 from poutyne.framework import Model, Callback
 from poutyne.framework.callbacks import ReduceLROnPlateau, ModelCheckpoint, EarlyStopping
 from comet_ml import Experiment
+from torchsummary import summary
+from torch import optim
 
 # Set CUDA device
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 
 
 params = {"lr": 1e-5, 
           "batch_size": 16,
           "epochs": 10000, 
           "model": "Teacher_imsize-28",
-          "im_size":28
+          "im_size":80
           }
 
 # Check LymphoMNIST version
@@ -166,7 +168,7 @@ def main():
     resnet50 = resnet50.to(device)
 
     # Print model summary
-    summary(resnet50, (1, 64, 64))
+    summary(resnet50, (3, params["im_size"], params["im_size"]))
 
     # Define optimizer, model, and callbacks
     optimizer = optim.Adam(resnet50.parameters(), lr=1e-5)
