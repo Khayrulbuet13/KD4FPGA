@@ -26,3 +26,4 @@ matplotlib
 pandas
 scikit-learn
 seaborn
+logger

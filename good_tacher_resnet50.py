@@ -18,6 +18,14 @@ from comet_ml import Experiment
 # Set CUDA device
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
+
+params = {"lr": 1e-5, 
+          "batch_size": 16,
+          "epochs": 10000, 
+          "model": "Teacher_imsize-28",
+          "im_size":28
+          }
+
 # Check LymphoMNIST version
 import LymphoMNIST as info
 print(f"LymphoMNIST v{info.__version__} @ {info.HOMEPAGE}")
@@ -111,7 +119,7 @@ def get_dataloaders(train_ds, val_ds, split=(0.5, 0.5), batch_size=64, sampler=N
     return train_dl, val_dl, test_dl
 
 # Define transforms
-im_size = 64
+im_size = params['im_size']
 val_transform = transforms.Compose([
     transforms.Resize((im_size, im_size)),
     transforms.ToTensor(),
@@ -166,8 +174,7 @@ def main():
 
     # Define callbacks
     project = Project()
-    model_name = "Teacher_final"
-    checkpoint_dir = project.checkpoint_dir / f"{model_name}_{datetime.datetime.now().strftime('%d %B %H:%M')}.pt"
+    checkpoint_dir = project.checkpoint_dir / f"{params['model']}_{datetime.datetime.now().strftime('%d %B %H:%M')}.pt"
     callbacks = [
         ReduceLROnPlateau(monitor="val_acc", patience=100, verbose=True),
         ModelCheckpoint(str(checkpoint_dir), save_best_only=True, verbose=True),
@@ -180,13 +187,13 @@ def main():
         project_name="KD4FPGA",
         workspace="khayrulbuet13"
     )
-    experiment.log_parameters({"lr": 1e-5, "batch_size": 16, "epochs": 10000, "model": model_name})
+    experiment.log_parameters(params)
     
     # Train model
     model.fit_generator(train_dl, val_dl, epochs=10, callbacks=callbacks)
 
     # Save final model weights
-    final_weights_path = project.checkpoint_dir / f"{model_name}_final_weights.pt"
+    final_weights_path = project.checkpoint_dir / f"{params['model']}_final_weights.pt"
     model.save_weights(final_weights_path)
     logging.info(f"Model weights saved to {final_weights_path}")
 
